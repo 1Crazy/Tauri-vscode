@@ -1,0 +1,22 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "Code OSS Tauri Shell",
+	"version": "0.1.0",
+	"identifier": "com.microsoft.codeoss.tauri.shell",
+	"build": {
+		"frontendDist": "../noop-dist"
+	},
+	"app": {
+		"withGlobalTauri": false,
+		"windows": [],
+		"security": {
+			"csp": null
+		}
+	},
+	"bundle": {
+		"active": false,
+		"icon": [
+			"icons/icon.png"
+		]
+	}
+}
