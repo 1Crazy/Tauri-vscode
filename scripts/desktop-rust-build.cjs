@@ -24,6 +24,7 @@ const standaloneWebExtensionsDir = path.join(repoRoot, '.build', 'web', 'extensi
 const standaloneWebNodeModulesDir = path.join(repoRoot, 'remote', 'web', 'node_modules');
 const standaloneWebServerResourcesDir = path.join(repoRoot, 'resources', 'server');
 const bundledWebGitignorePath = path.join(bundledWebDir, '.gitignore');
+const standaloneWebBundleScriptPath = path.join(repoRoot, 'build', 'next', 'index.ts');
 
 // Windows runners expose npm as npm.cmd, and spawnSync cannot execute .cmd
 // files directly without a shell. Keep the shell opt-in narrowly scoped so
@@ -122,6 +123,10 @@ function ensurePaths() {
 	if (!fs.existsSync(tauriIconSourcePath)) {
 		fail(`Missing source icon: ${tauriIconSourcePath}`);
 	}
+
+	if (!fs.existsSync(standaloneWebBundleScriptPath)) {
+		fail(`Missing standalone web bundler: ${standaloneWebBundleScriptPath}`);
+	}
 }
 
 function ensureDirectory(dirPath) {
@@ -181,6 +186,25 @@ function ensureTauriIcons() {
 	});
 }
 
+function buildStandaloneWebAssets(env) {
+	run(npmCommand, ['run', 'gulp', 'copy-codicons'], { env });
+	run(npmCommand, ['run', 'gulp', 'compile-web-extensions-build'], { env });
+
+	// The esbuild-based web bundle exists in build/gulpfile.vscode.web.ts, but
+	// that helper task is not registered as a standalone gulp CLI target in this
+	// repo snapshot. Call the underlying bundler entrypoint directly so CI stays
+	// stable across platforms instead of depending on gulp task registration.
+	run(process.execPath, [
+		standaloneWebBundleScriptPath,
+		'bundle',
+		'--out', path.relative(repoRoot, standaloneWebOutDir),
+		'--target', 'web',
+		'--minify',
+		'--mangle-privates',
+		'--nls'
+	], { env });
+}
+
 function main() {
 	const { skipCompile, tauriArgs } = parseArgs(process.argv.slice(2));
 
@@ -200,9 +224,7 @@ function main() {
 	ensureTauriIcons();
 
 	if (!skipCompile) {
-		run(npmCommand, ['run', 'gulp', 'copy-codicons'], { env });
-		run(npmCommand, ['run', 'gulp', 'compile-web-extensions-build'], { env });
-		run(npmCommand, ['run', 'gulp', 'esbuild-vscode-web-min'], { env });
+		buildStandaloneWebAssets(env);
 	}
 
 	stageStandaloneWebBundle();
