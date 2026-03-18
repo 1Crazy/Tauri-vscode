@@ -14,6 +14,13 @@ const tauriIconSourcePath = path.join(tauriRoot, 'icons', 'icon.png');
 const tauriMacIconPath = path.join(tauriRoot, 'icons', 'icon.icns');
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
+// Windows runners expose npm as npm.cmd, and spawnSync cannot execute .cmd
+// files directly without a shell. Keep the shell opt-in narrowly scoped so
+// Unix builds still execute binaries directly.
+function shouldUseShell(command) {
+	return process.platform === 'win32' && /\.(cmd|bat)$/i.test(path.basename(command));
+}
+
 function printHelp() {
 	console.log(
 		[
@@ -42,13 +49,15 @@ function fail(message) {
 function run(command, args, options = {}) {
 	const cwd = options.cwd ?? repoRoot;
 	const env = options.env ?? process.env;
+	const shell = options.shell ?? shouldUseShell(command);
 
 	console.log(`\n> ${command} ${args.join(' ')}`);
 
 	const result = cp.spawnSync(command, args, {
 		cwd,
 		env,
-		stdio: 'inherit'
+		stdio: 'inherit',
+		shell
 	});
 
 	if (result.error) {
