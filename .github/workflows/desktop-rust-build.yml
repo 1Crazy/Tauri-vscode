@@ -66,7 +66,7 @@ jobs:
         run: npm run desktop-rust-build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-rust-${{ matrix.label }}-bundle
           path: tauri-shell/src-tauri/target/release/bundle/**
