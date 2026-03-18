@@ -5,13 +5,21 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(not(debug_assertions))]
+mod bundled_web_server;
+
+#[cfg(debug_assertions)]
 use std::env;
+#[cfg(debug_assertions)]
 use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
+#[cfg(debug_assertions)]
+use std::process::Child;
+#[cfg(debug_assertions)]
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,6 +29,7 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 #[derive(Default)]
 struct AppState {
+	#[cfg(debug_assertions)]
 	code_web_child: Mutex<Option<Child>>,
 }
 
@@ -53,21 +62,12 @@ fn main() {
 			tauri_shell_remove_entry
 		])
 		.setup(|app| {
-			let repo_root = repo_root()?;
 			let port = reserve_loopback_port()?;
-			let mut child = spawn_code_web_server(&repo_root, port)?;
-
-			wait_for_server(&mut child, port, Duration::from_secs(30))?;
-
-			app.state::<AppState>()
-				.code_web_child
-				.lock()
-				.expect("app state mutex should not be poisoned")
-				.replace(child);
+			launch_workbench_content(app, port)?;
 
 			let window_url = url::Url::parse(&format!("http://127.0.0.1:{port}/"))?;
 
-			let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(window_url))
+			let _window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(window_url))
 				.title("Code OSS (Tauri Shell)")
 				.inner_size(1400.0, 900.0)
 				.min_inner_size(1024.0, 640.0)
@@ -75,7 +75,7 @@ fn main() {
 				.build()?;
 
 			#[cfg(debug_assertions)]
-			window.open_devtools();
+			_window.open_devtools();
 
 			Ok(())
 		})
@@ -87,6 +87,32 @@ fn main() {
 		});
 }
 
+fn launch_workbench_content<R: tauri::Runtime>(app: &mut tauri::App<R>, port: u16) -> io::Result<()> {
+	#[cfg(debug_assertions)]
+	{
+		let repo_root = repo_root()?;
+		let mut child = spawn_code_web_server(&repo_root, port)?;
+
+		wait_for_dev_server(&mut child, port, Duration::from_secs(30))?;
+
+		app.state::<AppState>()
+			.code_web_child
+			.lock()
+			.expect("app state mutex should not be poisoned")
+			.replace(child);
+	}
+
+	#[cfg(not(debug_assertions))]
+	{
+		let bundle_root = bundled_web_root(app)?;
+		bundled_web_server::start_bundled_web_server(bundle_root, port)?;
+		wait_for_port(port, Duration::from_secs(30))?;
+	}
+
+	Ok(())
+}
+
+#[cfg(debug_assertions)]
 fn repo_root() -> io::Result<PathBuf> {
 	if let Some(repo_root) = option_env!("TAURI_SHELL_REPO_ROOT") {
 		return Ok(PathBuf::from(repo_root));
@@ -110,6 +136,7 @@ fn reserve_loopback_port() -> io::Result<u16> {
 	Ok(port)
 }
 
+#[cfg(debug_assertions)]
 fn spawn_code_web_server(repo_root: &PathBuf, port: u16) -> io::Result<Child> {
 	let node_binary = env::var_os("NODE_BINARY")
 		.or_else(|| env::var_os("npm_node_execpath"))
@@ -131,7 +158,8 @@ fn spawn_code_web_server(repo_root: &PathBuf, port: u16) -> io::Result<Child> {
 		.spawn()
 }
 
-fn wait_for_server(child: &mut Child, port: u16, timeout: Duration) -> io::Result<()> {
+#[cfg(debug_assertions)]
+fn wait_for_dev_server(child: &mut Child, port: u16, timeout: Duration) -> io::Result<()> {
 	let deadline = Instant::now() + timeout;
 
 	loop {
@@ -157,6 +185,47 @@ fn wait_for_server(child: &mut Child, port: u16, timeout: Duration) -> io::Resul
 	}
 }
 
+#[cfg(not(debug_assertions))]
+fn wait_for_port(port: u16, timeout: Duration) -> io::Result<()> {
+	let deadline = Instant::now() + timeout;
+
+	loop {
+		if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+			return Ok(());
+		}
+
+		if Instant::now() >= deadline {
+			return Err(io::Error::new(
+				io::ErrorKind::TimedOut,
+				format!("timed out waiting for loopback server on 127.0.0.1:{port}"),
+			));
+		}
+
+		thread::sleep(Duration::from_millis(250));
+	}
+}
+
+#[cfg(not(debug_assertions))]
+fn bundled_web_root<R: tauri::Runtime, M: Manager<R>>(manager: &M) -> io::Result<PathBuf> {
+	let resource_dir = manager.path().resource_dir().map_err(|error| {
+		io::Error::new(
+			io::ErrorKind::NotFound,
+			format!("failed to resolve Tauri resource dir: {error}"),
+		)
+	})?;
+
+	let bundle_root = resource_dir.join("bundled").join("vscode-web");
+	if !bundle_root.exists() {
+		return Err(io::Error::new(
+			io::ErrorKind::NotFound,
+			format!("bundled web assets are missing at {}", bundle_root.display()),
+		));
+	}
+
+	Ok(bundle_root)
+}
+
+#[cfg(debug_assertions)]
 fn stop_code_web_server(app_handle: &AppHandle) {
 	let state = app_handle.state::<AppState>();
 	let mut guard = match state.code_web_child.lock() {
@@ -168,6 +237,10 @@ fn stop_code_web_server(app_handle: &AppHandle) {
 		let _ = child.kill();
 		let _ = child.wait();
 	}
+}
+
+#[cfg(not(debug_assertions))]
+fn stop_code_web_server(_app_handle: &AppHandle) {
 }
 
 #[tauri::command]

@@ -104,4 +104,4 @@ jobs:
         shell: bash
         run: |
           echo "Artifacts were uploaded from tauri-shell/src-tauri/target/release/bundle/"
-          echo "This Tauri shell currently still depends on the local repo checkout and Node runtime."
+          echo "Release bundles now embed the standalone VS Code web assets for offline desktop use."

@@ -10,9 +10,20 @@ const path = require('path');
 const repoRoot = path.join(__dirname, '..');
 const tauriRoot = path.join(repoRoot, 'tauri-shell', 'src-tauri');
 const bundleOutputDir = path.join(tauriRoot, 'target', 'release', 'bundle');
+const bundledResourcesDir = path.join(tauriRoot, 'bundled');
+const bundledWebDir = path.join(bundledResourcesDir, 'vscode-web');
+const bundledWebResourcesDir = path.join(bundledWebDir, 'resources', 'server');
+const bundledWebOutDir = path.join(bundledWebDir, 'out');
+const bundledWebExtensionsDir = path.join(bundledWebDir, 'extensions');
+const bundledWebNodeModulesDir = path.join(bundledWebDir, 'node_modules');
 const tauriIconSourcePath = path.join(tauriRoot, 'icons', 'icon.png');
 const tauriMacIconPath = path.join(tauriRoot, 'icons', 'icon.icns');
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const standaloneWebOutDir = path.join(repoRoot, 'out-vscode-web-min');
+const standaloneWebExtensionsDir = path.join(repoRoot, '.build', 'web', 'extensions');
+const standaloneWebNodeModulesDir = path.join(repoRoot, 'remote', 'web', 'node_modules');
+const standaloneWebServerResourcesDir = path.join(repoRoot, 'resources', 'server');
+const bundledWebGitignorePath = path.join(bundledWebDir, '.gitignore');
 
 // Windows runners expose npm as npm.cmd, and spawnSync cannot execute .cmd
 // files directly without a shell. Keep the shell opt-in narrowly scoped so
@@ -30,12 +41,12 @@ function printHelp() {
 			'  npm run desktop-rust-build -- --debug',
 			'',
 			'What it does:',
-			'  1. transpile the client out/ assets',
-			'  2. compile the web assets',
+			'  1. build the standalone VS Code web assets for distribution',
+			'  2. stage them into tauri-shell/src-tauri/bundled/vscode-web',
 			'  3. run `cargo tauri build` in tauri-shell/src-tauri',
 			'',
 			'Notes:',
-			'  - this bundle currently targets the local machine and still depends on the local repo checkout',
+			'  - release bundles embed the standalone web assets instead of depending on the local repo checkout',
 			'  - install `cargo-tauri` first if it is not available: cargo install tauri-cli --version "^2"'
 		].join('\n')
 	);
@@ -113,6 +124,53 @@ function ensurePaths() {
 	}
 }
 
+function ensureDirectory(dirPath) {
+	fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function resetDirectory(dirPath) {
+	fs.rmSync(dirPath, { recursive: true, force: true });
+	ensureDirectory(dirPath);
+}
+
+function copyDirectory(source, target) {
+	if (!fs.existsSync(source)) {
+		fail(`Missing directory to bundle: ${source}`);
+	}
+
+	fs.cpSync(source, target, {
+		recursive: true,
+		force: true,
+	});
+}
+
+function ensureBundledWebGitignore() {
+	// Keep the generated bundle directory out of git while still checking in the
+	// placeholder file that preserves the directory structure in fresh clones.
+	fs.writeFileSync(bundledWebGitignorePath, '*\n!.gitignore\n');
+}
+
+function stageStandaloneWebBundle() {
+	if (!fs.existsSync(standaloneWebOutDir)) {
+		fail(`Missing standalone web output: ${standaloneWebOutDir}`);
+	}
+
+	if (!fs.existsSync(standaloneWebExtensionsDir)) {
+		fail(`Missing bundled web extensions: ${standaloneWebExtensionsDir}`);
+	}
+
+	if (!fs.existsSync(standaloneWebNodeModulesDir)) {
+		fail(`Missing standalone web node_modules: ${standaloneWebNodeModulesDir}`);
+	}
+
+	resetDirectory(bundledWebDir);
+	copyDirectory(standaloneWebOutDir, bundledWebOutDir);
+	copyDirectory(standaloneWebExtensionsDir, bundledWebExtensionsDir);
+	copyDirectory(standaloneWebNodeModulesDir, bundledWebNodeModulesDir);
+	copyDirectory(standaloneWebServerResourcesDir, bundledWebResourcesDir);
+	ensureBundledWebGitignore();
+}
+
 function ensureTauriIcons() {
 	if (fs.existsSync(tauriMacIconPath)) {
 		return;
@@ -142,14 +200,16 @@ function main() {
 	ensureTauriIcons();
 
 	if (!skipCompile) {
-		run(npmCommand, ['run', 'transpile-client'], { env });
-		run(npmCommand, ['run', 'compile-web'], { env });
+		run(npmCommand, ['run', 'gulp', 'copy-codicons'], { env });
+		run(npmCommand, ['run', 'gulp', 'compile-web-extensions-build'], { env });
+		run(npmCommand, ['run', 'gulp', 'esbuild-vscode-web-min'], { env });
 	}
 
+	stageStandaloneWebBundle();
 	run('cargo', ['tauri', 'build', ...tauriArgs], { cwd: tauriRoot, env });
 
 	console.log(`\n[desktop-rust-build] Bundle output: ${bundleOutputDir}`);
-	console.log('[desktop-rust-build] This build currently still expects the local repo and Node runtime on this machine.');
+	console.log(`[desktop-rust-build] Embedded web assets: ${bundledWebDir}`);
 }
 
 main();
