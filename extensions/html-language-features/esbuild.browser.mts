@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type * as esbuild from 'esbuild';
 import { run } from '../esbuild-extension-common.mts';
 
@@ -19,7 +20,9 @@ function javaScriptLibsPlugin(): esbuild.Plugin {
 		name: 'javascript-libs',
 		setup(build) {
 			build.onLoad({ filter: /javascriptLibs\.ts$/ }, () => {
-				const TYPESCRIPT_LIB_SOURCE = path.dirname(import.meta.resolve('typescript').replace('file://', ''));
+				// `import.meta.resolve()` returns a file URL. Converting it with `fileURLToPath`
+				// keeps Windows drive letters intact instead of producing `/D:/...` paths.
+				const TYPESCRIPT_LIB_SOURCE = path.dirname(fileURLToPath(new URL(import.meta.resolve('typescript'))));
 				const JQUERY_DTS = path.join(extensionRoot, 'server', 'lib', 'jquery.d.ts');
 
 				function getFileName(name: string): string {
