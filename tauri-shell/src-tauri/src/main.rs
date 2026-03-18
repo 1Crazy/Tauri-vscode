@@ -88,6 +88,10 @@ fn main() {
 }
 
 fn repo_root() -> io::Result<PathBuf> {
+	if let Some(repo_root) = option_env!("TAURI_SHELL_REPO_ROOT") {
+		return Ok(PathBuf::from(repo_root));
+	}
+
 	let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 	let shell_root = manifest_dir
 		.parent()
@@ -109,6 +113,7 @@ fn reserve_loopback_port() -> io::Result<u16> {
 fn spawn_code_web_server(repo_root: &PathBuf, port: u16) -> io::Result<Child> {
 	let node_binary = env::var_os("NODE_BINARY")
 		.or_else(|| env::var_os("npm_node_execpath"))
+		.or_else(|| option_env!("TAURI_SHELL_NODE_BINARY").map(OsString::from))
 		.unwrap_or_else(|| OsString::from("node"));
 
 	Command::new(node_binary)
