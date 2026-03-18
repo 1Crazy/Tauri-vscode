@@ -1,0 +1,79 @@
+name: Desktop Rust Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop-rust-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-rust-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macos
+          - os: windows-latest
+            label: windows
+
+    env:
+      CI: true
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            tauri-shell/src-tauri -> target
+
+      - name: Install Tauri CLI
+        shell: bash
+        run: |
+          if cargo tauri --version >/dev/null 2>&1; then
+            cargo tauri --version
+          else
+            cargo install tauri-cli --version '^2' --locked
+          fi
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build desktop installers
+        run: npm run desktop-rust-build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-rust-${{ matrix.label }}-bundle
+          path: tauri-shell/src-tauri/target/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Print artifact note
+        shell: bash
+        run: |
+          echo "Artifacts were uploaded from tauri-shell/src-tauri/target/release/bundle/"
+          echo "This Tauri shell currently still depends on the local repo checkout and Node runtime."
