@@ -29,6 +29,7 @@ jobs:
     env:
       CI: true
       CARGO_TERM_COLOR: always
+      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout
